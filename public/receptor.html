@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Receptor de Video</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; }
+        img { border: 2px solid #333; margin-top: 10px; width: 640px; height: 480px; }
+    </style>
+</head>
+<body>
+    <h2>Visualizador (Receptor)</h2>
+    <img id="pantalla" alt="Esperando señal de video..." />
+
+    <script>
+        const socket = io();
+        const pantalla = document.getElementById('pantalla');
+
+        // Avisar al servidor que debe contarnos como espectadores
+        socket.emit('soy_receptor');
+
+        socket.on('stream', (imageBase64) => {
+            pantalla.src = imageBase64;
+        });
+    </script>
+</body>
+</html>
