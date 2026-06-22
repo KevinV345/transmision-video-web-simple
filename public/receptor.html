@@ -5,24 +5,69 @@
     <title>Receptor de Video</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; }
-        img { border: 2px solid #333; margin-top: 10px; width: 640px; height: 480px; }
+        body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; margin: 0; padding: 20px; }
+        .panel-control { background-color: white; padding: 15px; border-radius: 8px; max-width: 640px; margin: 0 auto 15px auto; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-around; align-items: center; }
+        select, button { padding: 8px; border-radius: 4px; border: 1px solid #ccc; }
+        button { background-color: #007bff; color: white; border: none; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #0056b3; }
+        img { border: 3px solid #333; width: 100%; max-width: 640px; background-color: #000; border-radius: 8px; }
     </style>
 </head>
 <body>
-    <h2>Visualizador (Receptor)</h2>
+    <h2>Visualizador y Control (Receptor)</h2>
+    
+    <div class="panel-control">
+        <div>
+            <label for="resolucion">Resolución:</label>
+            <select id="resolucion">
+                <option value="160x120">160x120 (Muy Baja - 4:3)</option>
+                <option value="320x240" selected>320x240 (Baja - 4:3)</option>
+                <option value="480x360">480x360 (Media Baja - 4:3)</option>
+                <option value="640x480">640x480 (Media - 4:3)</option>
+                <option value="800x600">800x600 (Alta - 4:3)</option>
+                <option value="1280x720">1280x720 (HD - 16:9)</option>
+                <option value="1920x1080">1920x1080 (Full HD - 16:9)</option>
+            </select>
+        </div>
+        <div>
+            <label for="fps">FPS:</label>
+            <select id="fps">
+                <option value="0.25">0.25 FPS</option>
+                <option value="0.5">0.5 FPS</option>
+                <option value="1" selected>1 FPS</option>
+                <option value="5">5 FPS</option>
+                <option value="10">10 FPS</option>
+                <option value="24">24 FPS</option>
+            </select>
+        </div>
+        <button onclick="enviarConfiguracion()">Aplicar al Emisor</button>
+    </div>
+
     <img id="pantalla" alt="Esperando señal de video..." />
 
     <script>
         const socket = io();
         const pantalla = document.getElementById('pantalla');
 
-        // Avisar al servidor que debe contarnos como espectadores
         socket.emit('soy_receptor');
 
         socket.on('stream', (imageBase64) => {
             pantalla.src = imageBase64;
         });
+
+        // Capturar valores del formulario y enviarlos al servidor
+        function enviarConfiguracion() {
+            const res = document.getElementById('resolucion').value.split('x');
+            const fps = parseFloat(document.getElementById('fps').value);
+            
+            const config = {
+                width: parseInt(res[0]),
+                height: parseInt(res[1]),
+                fps: fps
+            };
+
+            socket.emit('enviar_comando', config);
+        }
     </script>
 </body>
 </html>

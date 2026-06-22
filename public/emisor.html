@@ -8,31 +8,16 @@
         body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; margin: 0; padding: 20px; }
         .contenedor { max-width: 600px; margin: 0 auto; }
         canvas { border: 3px solid #333; margin-top: 15px; background-color: #000; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
-        
-        /* Estilos del panel de control (Dashboard) */
-        .dashboard {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-top: 20px;
-        }
-        .tarjeta {
-            background-color: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            border-left: 5px solid #ccc; /* Color por defecto (Gris) */
-            text-align: left;
-        }
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+        .tarjeta { background-color: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #ccc; text-align: left; }
         .tarjeta h4 { margin: 0 0 5px 0; color: #555; font-size: 14px; text-transform: uppercase; }
         .tarjeta .valor { font-size: 16px; font-weight: bold; color: #333; }
         .tarjeta .sub-valor { font-size: 12px; color: #777; margin-top: 5px; display: block; }
-
-        /* Colores de estado dinámicos */
         .estado-ok { border-left-color: #28a745; }
         .estado-pausa { border-left-color: #ffc107; }
         .estado-error { border-left-color: #dc3545; }
         .estado-info { border-left-color: #17a2b8; }
+        .estado-comando { border-left-color: #6f42c1; } /* Color morado para la configuración */
     </style>
 </head>
 <body>
@@ -44,13 +29,13 @@
 
         <div class="dashboard">
             <div class="tarjeta" id="card-servidor">
-                <h4>Servidor WebSocket</h4>
+                <h4>Servidor</h4>
                 <div class="valor" id="val-servidor">Desconectado</div>
             </div>
-
-            <div class="tarjeta" id="card-camara">
-                <h4>Cámara Web</h4>
-                <div class="valor" id="val-camara">Solicitando permisos...</div>
+            
+            <div class="tarjeta estado-comando">
+                <h4>Ajustes de Video</h4>
+                <div class="valor" id="val-ajustes">320x240 a 1 FPS</div>
             </div>
 
             <div class="tarjeta" id="card-espectadores">
@@ -77,74 +62,63 @@
         const canvas = document.getElementById('canvas');
         const context = canvas.getContext('2d');
 
-        // Referencias del DOM para actualizar estados
+        // Referencias del DOM
         const cardServidor = document.getElementById('card-servidor');
         const valServidor = document.getElementById('val-servidor');
-        
-        const cardCamara = document.getElementById('card-camara');
-        const valCamara = document.getElementById('val-camara');
-        
         const valEspectadores = document.getElementById('val-espectadores');
-        
         const cardTransmision = document.getElementById('card-transmision');
         const valTransmision = document.getElementById('val-transmision');
         const subTransmision = document.getElementById('sub-transmision');
-        
         const valTemporizador = document.getElementById('val-temporizador');
+        const valAjustes = document.getElementById('val-ajustes');
 
+        // Variables de estado
         let loopTransmision = null;
         let timerConsulta = null;
         let timerCuentaRegresiva = null;
+        
+        // Variables de configuración de video (Por defecto)
+        let configVideo = { width: 320, height: 240, fps: 1 };
 
-        // 1. Lógica de la Cámara
+        // Avisar al servidor que somos emisores para recibir comandos
+        socket.emit('soy_emisor');
+
         navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-            .then((stream) => {
-                video.srcObject = stream;
-                valCamara.innerText = "Activa y Capturando";
-                cardCamara.className = "tarjeta estado-ok";
-            })
-            .catch((err) => {
-                valCamara.innerText = "Error / Denegada";
-                cardCamara.className = "tarjeta estado-error";
-            });
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => { console.error('Error de cámara', err); });
 
-        // 2. Lógica del Temporizador Visual
         function iniciarCuentaRegresiva(segundos) {
             if (timerCuentaRegresiva) clearInterval(timerCuentaRegresiva);
-            
             let tiempoRestante = segundos;
             valTemporizador.innerText = `${tiempoRestante} segundos`;
-
             timerCuentaRegresiva = setInterval(() => {
                 tiempoRestante--;
                 valTemporizador.innerText = `${tiempoRestante} segundos`;
-                if (tiempoRestante <= 0) {
-                    clearInterval(timerCuentaRegresiva);
-                    valTemporizador.innerText = "Consultando ahora...";
-                }
+                if (tiempoRestante <= 0) clearInterval(timerCuentaRegresiva);
             }, 1000);
         }
 
-        // 3. Lógica de Captura y Transmisión
         function enviarFrame() {
             if (video.readyState === video.HAVE_ENOUGH_DATA) {
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const frameBase64 = canvas.toDataURL('image/jpeg', 0.4);
                 socket.emit('stream', frameBase64);
-                
-                // Actualizar la hora del último frame para saber que está vivo
                 subTransmision.innerText = `Último frame: ${new Date().toLocaleTimeString()}`;
             }
         }
 
         function iniciarTransmision() {
-            if (!loopTransmision) {
-                enviarFrame();
-                loopTransmision = setInterval(enviarFrame, 1000);
-                
-                valTransmision.innerText = "Enviando (1 FPS)";
-                cardTransmision.className = "tarjeta estado-ok";
-            }
+            // Si ya hay un bucle corriendo, lo detenemos para aplicar los nuevos FPS
+            if (loopTransmision) clearInterval(loopTransmision);
+            
+            enviarFrame();
+            
+            // Calculamos los milisegundos basados en los FPS actuales
+            const intervaloMs = 1000 / configVideo.fps;
+            loopTransmision = setInterval(enviarFrame, intervaloMs);
+            
+            valTransmision.innerText = `Enviando (${configVideo.fps} FPS)`;
+            cardTransmision.className = "tarjeta estado-ok";
         }
 
         function detenerTransmision() {
@@ -152,44 +126,57 @@
                 clearInterval(loopTransmision);
                 loopTransmision = null;
             }
-            valTransmision.innerText = "Pausada (Ahorro de ancho de banda)";
+            valTransmision.innerText = "Pausada (Cero espectadores)";
             cardTransmision.className = "tarjeta estado-pausa";
         }
 
-        // 4. Lógica de Consulta de Clientes
         function consultarClientes() {
             socket.emit('check_clientes', (cantidad) => {
-                // Actualizar tarjeta de espectadores
                 valEspectadores.innerText = cantidad;
-
                 if (cantidad > 0) {
                     iniciarTransmision();
-                    iniciarCuentaRegresiva(60); // 1 minuto
+                    iniciarCuentaRegresiva(60);
                     timerConsulta = setTimeout(consultarClientes, 60000);
                 } else {
                     detenerTransmision();
-                    iniciarCuentaRegresiva(600); // 5 
+                    iniciarCuentaRegresiva(300);
                     timerConsulta = setTimeout(consultarClientes, 300000);
                 }
             });
         }
 
-        // 5. Eventos del Servidor (WebSocket)
+        // --- NUEVO: Escuchar comandos del receptor ---
+        socket.on('aplicar_comando', (nuevaConfig) => {
+            // 1. Actualizar variables locales
+            configVideo.width = nuevaConfig.width;
+            configVideo.height = nuevaConfig.height;
+            configVideo.fps = nuevaConfig.fps;
+            
+            // 2. Redimensionar el Canvas
+            canvas.width = configVideo.width;
+            canvas.height = configVideo.height;
+            
+            // 3. Actualizar la interfaz
+            valAjustes.innerText = `${configVideo.width}x${configVideo.height} a ${configVideo.fps} FPS`;
+
+            // 4. Reiniciar el bucle de transmisión (solo si está activo actualmente)
+            if (loopTransmision) {
+                iniciarTransmision(); 
+            }
+        });
+
         socket.on('connect', () => {
             valServidor.innerText = "Conectado";
             cardServidor.className = "tarjeta estado-ok";
-            consultarClientes(); // Iniciar el ciclo de consultas al conectar
+            consultarClientes();
         });
 
         socket.on('disconnect', () => {
             valServidor.innerText = "Desconectado";
             cardServidor.className = "tarjeta estado-error";
-            
-            // Si el servidor cae, detenemos todo para evitar errores
             if (timerConsulta) clearTimeout(timerConsulta);
             if (timerCuentaRegresiva) clearInterval(timerCuentaRegresiva);
             detenerTransmision();
-            valTemporizador.innerText = "Esperando reconexión...";
         });
     </script>
 </body>

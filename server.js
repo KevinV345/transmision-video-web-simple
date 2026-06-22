@@ -11,17 +11,22 @@ app.use(express.static('public'));
 io.on('connection', (socket) => {
     console.log('Un cliente se ha conectado:', socket.id);
 
-    // Identificar a los receptores y unirlos a una sala
-    socket.on('soy_receptor', () => {
-        socket.join('receptores');
-    });
+    // Registrar clientes en sus respectivas salas
+    socket.on('soy_receptor', () => socket.join('receptores'));
+    socket.on('soy_emisor', () => socket.join('emisores'));
 
-    // Retransmitir solo a los clientes en la sala 'receptores'
+    // Flujo de Video: Emisor -> Receptores
     socket.on('stream', (imageBase64) => {
         socket.to('receptores').emit('stream', imageBase64);
     });
 
-    // Responder a la consulta del emisor sobre cuántos receptores hay
+    // Flujo de Comandos: Receptor -> Emisores
+    socket.on('enviar_comando', (configuracion) => {
+        console.log('Comando recibido:', configuracion);
+        socket.to('emisores').emit('aplicar_comando', configuracion);
+    });
+
+    // Contador de espectadores
     socket.on('check_clientes', (callback) => {
         const salaReceptores = io.sockets.adapter.rooms.get('receptores');
         const cantidad = salaReceptores ? salaReceptores.size : 0;
