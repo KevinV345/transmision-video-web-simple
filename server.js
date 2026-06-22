@@ -9,32 +9,33 @@ const io = new Server(server);
 app.use(express.static('public'));
 
 io.on('connection', (socket) => {
-    console.log('Un cliente se ha conectado:', socket.id);
-
-    // Registrar clientes en sus respectivas salas
-    socket.on('soy_receptor', () => socket.join('receptores'));
-    socket.on('soy_emisor', () => socket.join('emisores'));
-
-    // Flujo de Video: Emisor -> Receptores
-    socket.on('stream', (imageBase64) => {
-        socket.to('receptores').emit('stream', imageBase64);
+    socket.on('soy_receptor', () => {
+        socket.join('receptores');
+        socket.to('emisores').emit('nuevo_receptor', socket.id);
     });
 
-    // Flujo de Comandos: Receptor -> Emisores
+    socket.on('soy_emisor', () => {
+        socket.join('emisores');
+    });
+
+    socket.on('webrtc_offer', (data) => {
+        io.to(data.target).emit('webrtc_offer', { sdp: data.sdp, sender: socket.id });
+    });
+
+    socket.on('webrtc_answer', (data) => {
+        io.to(data.target).emit('webrtc_answer', { sdp: data.sdp, sender: socket.id });
+    });
+
+    socket.on('webrtc_ice', (data) => {
+        io.to(data.target).emit('webrtc_ice', { candidate: data.candidate, sender: socket.id });
+    });
+
     socket.on('enviar_comando', (configuracion) => {
-        console.log('Comando recibido:', configuracion);
         socket.to('emisores').emit('aplicar_comando', configuracion);
     });
 
-    // Contador de espectadores
-    socket.on('check_clientes', (callback) => {
-        const salaReceptores = io.sockets.adapter.rooms.get('receptores');
-        const cantidad = salaReceptores ? salaReceptores.size : 0;
-        callback(cantidad);
-    });
-
     socket.on('disconnect', () => {
-        console.log('Cliente desconectado:', socket.id);
+        socket.to('emisores').emit('receptor_desconectado', socket.id);
     });
 });
 

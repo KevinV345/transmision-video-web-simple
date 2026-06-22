@@ -7,25 +7,22 @@
     <style>
         body { font-family: sans-serif; text-align: center; background-color: #f0f2f5; margin: 0; padding: 20px; }
         .contenedor { max-width: 600px; margin: 0 auto; }
-        canvas { border: 3px solid #333; margin-top: 15px; background-color: #000; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        video { border: 3px solid #333; margin-top: 15px; background-color: #000; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); width: 100%; max-width: 640px; }
         .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
         .tarjeta { background-color: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border-left: 5px solid #ccc; text-align: left; }
         .tarjeta h4 { margin: 0 0 5px 0; color: #555; font-size: 14px; text-transform: uppercase; }
         .tarjeta .valor { font-size: 16px; font-weight: bold; color: #333; }
-        .tarjeta .sub-valor { font-size: 12px; color: #777; margin-top: 5px; display: block; }
         .estado-ok { border-left-color: #28a745; }
         .estado-pausa { border-left-color: #ffc107; }
         .estado-error { border-left-color: #dc3545; }
-        .estado-info { border-left-color: #17a2b8; }
-        .estado-comando { border-left-color: #6f42c1; } /* Color morado para la configuración */
+        .estado-comando { border-left-color: #6f42c1; }
     </style>
 </head>
 <body>
     <div class="contenedor">
         <h2>Panel de Control - Emisor</h2>
         
-        <video id="video" autoplay style="display: none;"></video>
-        <canvas id="canvas" width="320" height="240"></canvas>
+        <video id="video" autoplay muted playsinline></video>
 
         <div class="dashboard">
             <div class="tarjeta" id="card-servidor">
@@ -40,18 +37,12 @@
 
             <div class="tarjeta" id="card-espectadores">
                 <h4>Espectadores</h4>
-                <div class="valor" id="val-espectadores">Desconocido</div>
+                <div class="valor" id="val-espectadores">0</div>
             </div>
 
             <div class="tarjeta" id="card-transmision">
                 <h4>Estado de Transmisión</h4>
-                <div class="valor" id="val-transmision">Detenida</div>
-                <span class="sub-valor" id="sub-transmision">Último frame: Ninguno</span>
-            </div>
-
-            <div class="tarjeta estado-info" style="grid-column: span 2;">
-                <h4>Próxima Consulta al Servidor en:</h4>
-                <div class="valor" id="val-temporizador">--</div>
+                <div class="valor" id="val-transmision">Pausada</div>
             </div>
         </div>
     </div>
@@ -59,124 +50,110 @@
     <script>
         const socket = io();
         const video = document.getElementById('video');
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d');
-
-        // Referencias del DOM
         const cardServidor = document.getElementById('card-servidor');
         const valServidor = document.getElementById('val-servidor');
         const valEspectadores = document.getElementById('val-espectadores');
         const cardTransmision = document.getElementById('card-transmision');
         const valTransmision = document.getElementById('val-transmision');
-        const subTransmision = document.getElementById('sub-transmision');
-        const valTemporizador = document.getElementById('val-temporizador');
         const valAjustes = document.getElementById('val-ajustes');
 
-        // Variables de estado
-        let loopTransmision = null;
-        let timerConsulta = null;
-        let timerCuentaRegresiva = null;
-        
-        // Variables de configuración de video (Por defecto)
-        let configVideo = { width: 320, height: 240, fps: 1 };
+        let localStream;
+        const peers = {};
+        const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-        // Avisar al servidor que somos emisores para recibir comandos
         socket.emit('soy_emisor');
 
-        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-            .then(stream => { video.srcObject = stream; })
-            .catch(err => { console.error('Error de cámara', err); });
-
-        function iniciarCuentaRegresiva(segundos) {
-            if (timerCuentaRegresiva) clearInterval(timerCuentaRegresiva);
-            let tiempoRestante = segundos;
-            valTemporizador.innerText = `${tiempoRestante} segundos`;
-            timerCuentaRegresiva = setInterval(() => {
-                tiempoRestante--;
-                valTemporizador.innerText = `${tiempoRestante} segundos`;
-                if (tiempoRestante <= 0) clearInterval(timerCuentaRegresiva);
-            }, 1000);
-        }
-
-        function enviarFrame() {
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const frameBase64 = canvas.toDataURL('image/jpeg', 0.4);
-                socket.emit('stream', frameBase64);
-                subTransmision.innerText = `Último frame: ${new Date().toLocaleTimeString()}`;
+        async function iniciarCamara(width, height, fps) {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
             }
-        }
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: width }, height: { ideal: height }, frameRate: { ideal: fps } },
+                    audio: false
+                });
+                video.srcObject = localStream;
+                valAjustes.innerText = `${width}x${height} a ${fps} FPS`;
 
-        function iniciarTransmision() {
-            // Si ya hay un bucle corriendo, lo detenemos para aplicar los nuevos FPS
-            if (loopTransmision) clearInterval(loopTransmision);
-            
-            enviarFrame();
-            
-            // Calculamos los milisegundos basados en los FPS actuales
-            const intervaloMs = 1000 / configVideo.fps;
-            loopTransmision = setInterval(enviarFrame, intervaloMs);
-            
-            valTransmision.innerText = `Enviando (${configVideo.fps} FPS)`;
-            cardTransmision.className = "tarjeta estado-ok";
-        }
-
-        function detenerTransmision() {
-            if (loopTransmision) {
-                clearInterval(loopTransmision);
-                loopTransmision = null;
-            }
-            valTransmision.innerText = "Pausada (Cero espectadores)";
-            cardTransmision.className = "tarjeta estado-pausa";
-        }
-
-        function consultarClientes() {
-            socket.emit('check_clientes', (cantidad) => {
-                valEspectadores.innerText = cantidad;
-                if (cantidad > 0) {
-                    iniciarTransmision();
-                    iniciarCuentaRegresiva(60);
-                    timerConsulta = setTimeout(consultarClientes, 60000);
-                } else {
-                    detenerTransmision();
-                    iniciarCuentaRegresiva(300);
-                    timerConsulta = setTimeout(consultarClientes, 300000);
+                for (const peerId in peers) {
+                    const sender = peers[peerId].getSenders().find(s => s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(localStream.getVideoTracks()[0]);
                 }
-            });
+            } catch (e) {
+                console.error(e);
+            }
         }
 
-        // --- NUEVO: Escuchar comandos del receptor ---
-        socket.on('aplicar_comando', (nuevaConfig) => {
-            // 1. Actualizar variables locales
-            configVideo.width = nuevaConfig.width;
-            configVideo.height = nuevaConfig.height;
-            configVideo.fps = nuevaConfig.fps;
-            
-            // 2. Redimensionar el Canvas
-            canvas.width = configVideo.width;
-            canvas.height = configVideo.height;
-            
-            // 3. Actualizar la interfaz
-            valAjustes.innerText = `${configVideo.width}x${configVideo.height} a ${configVideo.fps} FPS`;
+        iniciarCamara(320, 240, 1);
 
-            // 4. Reiniciar el bucle de transmisión (solo si está activo actualmente)
-            if (loopTransmision) {
-                iniciarTransmision(); 
+        socket.on('nuevo_receptor', async (receptorId) => {
+            const peer = new RTCPeerConnection(iceServers);
+            peers[receptorId] = peer;
+
+            if (localStream) {
+                localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
             }
+
+            peer.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('webrtc_ice', { target: receptorId, candidate: event.candidate });
+                }
+            };
+
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            socket.emit('webrtc_offer', { target: receptorId, sdp: peer.localDescription });
+
+            actualizarEspectadores();
+        });
+
+        socket.on('webrtc_answer', async (data) => {
+            if (peers[data.sender]) {
+                await peers[data.sender].setRemoteDescription(new RTCSessionDescription(data.sdp));
+            }
+        });
+
+        socket.on('webrtc_ice', (data) => {
+            if (peers[data.sender] && data.candidate) {
+                peers[data.sender].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        });
+
+        socket.on('receptor_desconectado', (receptorId) => {
+            if (peers[receptorId]) {
+                peers[receptorId].close();
+                delete peers[receptorId];
+                actualizarEspectadores();
+            }
+        });
+
+        function actualizarEspectadores() {
+            const num = Object.keys(peers).length;
+            valEspectadores.innerText = num;
+            if (num > 0) {
+                valTransmision.innerText = "Transmitiendo (WebRTC)";
+                cardTransmision.className = "tarjeta estado-ok";
+            } else {
+                valTransmision.innerText = "Pausada";
+                cardTransmision.className = "tarjeta estado-pausa";
+            }
+        }
+
+        socket.on('aplicar_comando', (config) => {
+            iniciarCamara(config.width, config.height, config.fps);
         });
 
         socket.on('connect', () => {
             valServidor.innerText = "Conectado";
             cardServidor.className = "tarjeta estado-ok";
-            consultarClientes();
         });
 
         socket.on('disconnect', () => {
             valServidor.innerText = "Desconectado";
             cardServidor.className = "tarjeta estado-error";
-            if (timerConsulta) clearTimeout(timerConsulta);
-            if (timerCuentaRegresiva) clearInterval(timerCuentaRegresiva);
-            detenerTransmision();
+            for (const id in peers) peers[id].close();
+            for (const id in peers) delete peers[id];
+            actualizarEspectadores();
         });
     </script>
 </body>
